@@ -50,6 +50,47 @@ def create_stripe_subscription(gateway_controller, data):
 		}
 
 
+def _resolve_stripe_discounts(subscription_data):
+    """
+    Collect Stripe coupon IDs from child table rows.
+    Coupon Required:coupon.custom_pricing_rules[].stripe_coupon_id(one per pricing rule)
+    Direct Discount:ss_plan.membership_items[].stripe_coupon_id(one per item)
+    Returns:
+        list: [{"coupon": id}] for Stripe subscription discounts.
+    """
+
+    seen = set()
+    discounts = []
+
+    coupon_code = subscription_data.get("custom_coupon_code") or ""
+    plan_name = subscription_data.get("custom_plan_name") or ""
+
+    if coupon_code and frappe.db.exists("Coupon Code", coupon_code):
+        coupon = frappe.get_doc("Coupon Code", coupon_code)
+
+        for row in coupon.get("custom_pricing_rules") or []:
+            cid = (row.get("stripe_coupon_id") or "").strip()
+
+            if cid and cid not in seen:
+                discounts.append({"coupon": cid})
+                seen.add(cid)
+
+    if (
+        not discounts
+        and plan_name
+        and frappe.db.exists("SS-Pricing-Plans", plan_name)
+    ):
+        ss_plan = frappe.get_doc("SS-Pricing-Plans", plan_name)
+
+        for mi in ss_plan.membership_items or []:
+            cid = (mi.get("stripe_coupon_id") or "").strip()
+
+            if cid and cid not in seen:
+                discounts.append({"coupon": cid})
+                seen.add(cid)
+
+    return discounts
+
 def create_subscription_on_stripe(stripe_settings):
 	items = []
 	item_one_time = []
@@ -58,15 +99,7 @@ def create_subscription_on_stripe(stripe_settings):
 	sales_invoice_doc = frappe.get_doc("Sales Invoice", payment_request_doc.reference_name)
 	subscription_data = frappe.get_doc("Subscription", sales_invoice_doc.subscription)
 
-	_stripe_coupon_id = ""
-	if subscription_data.get("custom_coupon_code"):
-		_stripe_coupon_id = frappe.db.get_value(
-			"Coupon Code", subscription_data.custom_coupon_code, "custom_stripe_coupon_id") or ""
-	if not _stripe_coupon_id and subscription_data.get("custom_plan_name"):
-		_stripe_coupon_id = frappe.db.get_value(
-            "SS-Pricing-Plans", subscription_data.custom_plan_name, "default_stripe_coupon_id") or ""
-	if _stripe_coupon_id:
-		discount_items = [{"coupon": _stripe_coupon_id}]
+	discount_items = _resolve_stripe_discounts(subscription_data)
 
 	for payment_plan in stripe_settings.payment_plans:
         # ← plan fetched here inside loop
