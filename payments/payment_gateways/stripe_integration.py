@@ -3,8 +3,6 @@
 
 import stripe
 import frappe
-from datetime import datetime, timedelta
-import pytz
 from frappe import _
 from frappe.integrations.utils import create_request_log
 
@@ -94,11 +92,9 @@ def _resolve_stripe_discounts(subscription_data):
 def create_subscription_on_stripe(stripe_settings):
 	items = []
 	item_one_time = []
-	discount_items = []
 	payment_request_doc = frappe.get_doc("Payment Request", stripe_settings.data.reference_docname)
 	sales_invoice_doc = frappe.get_doc("Sales Invoice", payment_request_doc.reference_name)
 	subscription_data = frappe.get_doc("Subscription", sales_invoice_doc.subscription)
-
 	discount_items = _resolve_stripe_discounts(subscription_data)
 
 	for payment_plan in stripe_settings.payment_plans:
@@ -177,43 +173,19 @@ def create_subscription_on_stripe(stripe_settings):
 				)
 				selected_card_id = payment_method_id
 
-			tz = pytz.timezone("America/Los_Angeles")
-			start_date = datetime(2025, 11, 8, 0, 0, 0, tzinfo=tz)
-
-			# Get the current UTC time
-			now = datetime.now(tz)
-
-			# If today is before or on 8 Nov 2025 → delay start
-			if now <= start_date:
-				subscription = stripe.Subscription.create(
-					customer=customer,
-					discounts=discount_items,
-					items=items,
-					add_invoice_items=item_one_time,
-					billing_mode={"type": "flexible"},
-					off_session=True,
-					payment_behavior="error_if_incomplete",
-					proration_behavior="none",
-					billing_cycle_anchor="1762588800",  # schedule start on 8 Nov
-					metadata={
-						"customer_id": customer.id
-					}
-				)
-			else:
-				# Start immediately
-				subscription = stripe.Subscription.create(
-					customer=customer,
-					discounts=discount_items,
-					items=items,
-					add_invoice_items=item_one_time,
-					billing_mode={"type": "flexible"},
-					off_session=True,
-					payment_behavior="error_if_incomplete",
-					proration_behavior="none",
-					metadata={
-						"customer_id": customer.id
-					}
-				)
+			subscription = stripe.Subscription.create(
+				customer=customer,
+				discounts=discount_items,
+				items=items,
+				add_invoice_items=item_one_time,
+				billing_mode={"type": "flexible"},
+				off_session=True,
+				payment_behavior="error_if_incomplete",
+				proration_behavior="none",
+				metadata={
+					"customer_id": customer.id
+				}
+			)
 
 			if subscription.status == "active":
 				stripe_settings.integration_request.db_set("status", "Completed", update_modified=False)
@@ -224,7 +196,7 @@ def create_subscription_on_stripe(stripe_settings):
 				frappe.log_error(f"Stripe Subscription ID {subscription.id}: Payment failed")
 		else:
 			stripe_settings.integration_request.db_set("status", "Failed", update_modified=False)
-			frappe.log_error(f"Stripe Subscription ID {subscription_data.id}: Payment Link Expired")
+			frappe.log_error(f"Stripe Subscription ID {subscription_data.name}: Payment Link Expired")
 			frappe.throw("Payment Link Expired")
 	except Exception:
 		stripe_settings.integration_request.db_set("status", "Failed", update_modified=False)
