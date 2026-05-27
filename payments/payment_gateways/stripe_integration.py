@@ -183,7 +183,8 @@ def create_subscription_on_stripe(stripe_settings):
 				payment_behavior="error_if_incomplete",
 				proration_behavior="none",
 				metadata={
-					"customer_id": customer.id
+					"customer_id": customer.id,
+					"subscription_id": subscription_data.name,
 				}
 			)
 

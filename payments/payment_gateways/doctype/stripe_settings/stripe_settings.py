@@ -266,7 +266,10 @@ class StripeSettings(Document):
 						intent = stripe.PaymentIntent.create(
 							amount=cint(flt(self.data.amount) * 100),
 							metadata={
-								"customer_id": customer.id
+								"customer_id": customer.id,
+								"booking_id": booking_doc.name,
+								"sales_invoice": sales_invoice_id,
+								"payment_request_id": booking_doc.payment_request_id,
 							},
 							currency=self.data.currency,
 							payment_method=payment_method.id,
@@ -334,7 +337,10 @@ class StripeSettings(Document):
 							description=self.data.description,
 							receipt_email=self.data.payer_email,
 							metadata={
-								"customer_id": customer.id
+								"customer_id": customer.id,
+								"booking_id": booking_doc.name,
+								"sales_invoice": sales_invoice_id,
+								"payment_request_id": booking_doc.payment_request_id,
 							}
 						)
 
@@ -344,9 +350,6 @@ class StripeSettings(Document):
 						else:
 							frappe.log_error(charge.failure_message, "Stripe Payment not completed")
 
-						# frappe.log_error("booking_start - current_time",booking_start - current_time)
-						# frappe.log_error("timedelta(hours=24)",timedelta(hours=24))
-						# frappe.log_error("booking_start - current_time > timedelta(hours=24)",f"{booking_start - current_time > timedelta(hours=24)}")
 				else:
 					self.integration_request.db_set("status", "Failed", update_modified=False)
 					self.flags.status_changed_to = "Failed"
@@ -374,7 +377,10 @@ class StripeSettings(Document):
 						description=self.data.description,
 						receipt_email=self.data.payer_email,
 						metadata={
-							"customer_id": customer.id
+							"customer_id": customer.id,
+							"booking_id": as_booking,
+							"sales_invoice": booking_doc.sales_invoice_id,
+							"payment_request_id": booking_doc.payment_request_id,
 						}
 					)
 
@@ -386,7 +392,7 @@ class StripeSettings(Document):
 				else:
 					self.integration_request.db_set("status", "Failed", update_modified=False)
 					self.flags.status_changed_to = "Failed"
-					frappe.log_error("Payment Link Expired", f"Payment Link Expired {pr.name}")	
+					frappe.log_error("Payment Link Expired", f"Payment Link Expired {pr.name}")
 			else:
 				payer_email = self.data.payer_email
 				customer_list = frappe.get_all("Customer", filters={"email_id": payer_email}, limit=1)
@@ -399,6 +405,14 @@ class StripeSettings(Document):
 						name=payer_name,
 						email=payer_email
 					)
+				_pr_name = frappe.db.get_value(
+					"Payment Request",
+					{"party": customer_list[0].name, "subject": self.data.description, "status": "Requested"},
+					"name",
+					order_by="creation desc"
+				)
+				_si_name = frappe.db.get_value("Payment Request", _pr_name, "reference_name") if _pr_name else ""
+				_package_name = self.data.description.replace("Payment Request for ", "") if self.data.description.startswith("Payment Request for ") else ""
 				charge = stripe.Charge.create(
 					amount=cint(flt(self.data.amount) * 100),
 					currency=self.data.currency,
@@ -406,14 +420,16 @@ class StripeSettings(Document):
 					description=self.data.description,
 					receipt_email=self.data.payer_email,
 					metadata={
-						"customer_id": customer.id
+						"customer_id": customer.id,
+						"payment_request_id": _pr_name or "",
+						"sales_invoice_id": _si_name or "",
+						"package_name": _package_name,
 					}
 				)
 
 				if charge.captured == True:
 					self.integration_request.db_set("status", "Completed", update_modified=False)
 					self.flags.status_changed_to = "Completed"
-
 				else:
 					frappe.log_error(charge.failure_message, "Stripe Payment not completed")
 
