@@ -57,13 +57,20 @@ def create_subscription_on_stripe(stripe_settings):
 	payment_request_doc = frappe.get_doc("Payment Request", stripe_settings.data.reference_docname)
 	sales_invoice_doc = frappe.get_doc("Sales Invoice", payment_request_doc.reference_name)
 	subscription_data = frappe.get_doc("Subscription", sales_invoice_doc.subscription)
+
+	_stripe_coupon_id = ""
+	if subscription_data.get("custom_coupon_code"):
+		_stripe_coupon_id = frappe.db.get_value(
+			"Coupon Code", subscription_data.custom_coupon_code, "custom_stripe_coupon_id") or ""
+	if not _stripe_coupon_id and subscription_data.get("custom_plan_name"):
+		_stripe_coupon_id = frappe.db.get_value(
+            "SS-Pricing-Plans", subscription_data.custom_plan_name, "default_stripe_coupon_id") or ""
+	if _stripe_coupon_id:
+		discount_items = [{"coupon": _stripe_coupon_id}]
+
 	for payment_plan in stripe_settings.payment_plans:
-		plan = frappe.db.get_value("Subscription Plan",payment_plan.plan,["product_price_id", "custom_product_coupons_id"],as_dict=True)
-		if plan.custom_product_coupons_id and subscription_data.custom_coupon_code:
-			if subscription_data.custom_coupon_code == "SPRINGDEAL":
-				discount_items.append({"coupon": plan.custom_product_coupons_id})
-		elif plan.custom_product_coupons_id and (sales_invoice_doc.apply_discount_on == "Grand Total" and sales_invoice_doc.discount_amount > 0):
-			discount_items.append({"coupon": plan.custom_product_coupons_id})
+        # ← plan fetched here inside loop
+		plan = frappe.db.get_value("Subscription Plan", payment_plan.plan, ["product_price_id"], as_dict=True)
 		price_obj = stripe.Price.retrieve(plan.product_price_id)
 		if price_obj["type"] == "recurring":
 			items.append({"price": plan.product_price_id, "quantity": payment_plan.qty if payment_plan.qty > 0 else 1})
